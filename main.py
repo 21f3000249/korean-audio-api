@@ -2,10 +2,14 @@ import os
 import json
 import re
 import base64
+import logging
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 import httpx
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("korean-audio-api")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -65,6 +69,7 @@ async def _transcribe_korean(audio_bytes: bytes) -> str:
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(GROQ_URL, headers=headers, files=files, data=data)
         if resp.status_code >= 400:
+            logger.error("GROQ ERROR %s: %s", resp.status_code, resp.text)
             raise HTTPException(
                 status_code=502, detail=f"Groq transcription error {resp.status_code}: {resp.text}"
             )
@@ -98,6 +103,7 @@ async def _extract_spec(transcript: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
         if resp.status_code >= 400:
+            logger.error("ANTHROPIC ERROR %s: %s", resp.status_code, resp.text)
             raise HTTPException(
                 status_code=502, detail=f"Anthropic API error {resp.status_code}: {resp.text}"
             )
@@ -120,10 +126,22 @@ async def _handle(request: Request) -> dict:
     if not audio_b64:
         raise HTTPException(status_code=422, detail="Missing 'audio_base64'.")
 
-    audio_bytes = base64.b64decode(audio_b64)
-    transcript = await _transcribe_korean(audio_bytes)
-    spec = await _extract_spec(transcript)
-    return spec
+    try:
+        audio_bytes = base64.b64decode(audio_b64)
+    except Exception as e:
+        logger.exception("Base64 decode failed")
+        raise HTTPException(status_code=422, detail=f"Invalid base64 audio: {e}")
+
+    try:
+        transcript = await _transcribe_korean(audio_bytes)
+        logger.info("TRANSCRIPT: %s", transcript[:500])
+        spec = await _extract_spec(transcript)
+        return spec
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error in _handle")
+        raise HTTPException(status_code=502, detail=f"Unexpected error: {e}")
 
 
 @app.get("/")
