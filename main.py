@@ -110,6 +110,36 @@ def _regex_categorical_fields(transcript: str) -> dict[str, list[str]]:
     return found
 
 
+def _normalize_field_name(name: str) -> str:
+    """Whisper often transcribes '점수1' as '점수 1' (space before a trailing
+    number). Collapse that so column names match the expected exact form."""
+    if not isinstance(name, str):
+        return name
+    return re.sub(r"(?<=[가-힣A-Za-z])\s+(?=\d)", "", name).strip()
+
+
+def _normalize_spec_names(spec: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(spec.get("columns"), list):
+        spec["columns"] = [_normalize_field_name(c) for c in spec["columns"]]
+
+    per_column_keys = [
+        "mean", "std", "variance", "min", "max", "median", "mode",
+        "range", "allowed_values", "value_range",
+    ]
+    for key in per_column_keys:
+        if isinstance(spec.get(key), dict):
+            spec[key] = {
+                _normalize_field_name(col): val for col, val in spec[key].items()
+            }
+
+    if isinstance(spec.get("correlation"), list):
+        for entry in spec["correlation"]:
+            if isinstance(entry, dict) and isinstance(entry.get("columns"), list):
+                entry["columns"] = [_normalize_field_name(c) for c in entry["columns"]]
+
+    return spec
+
+
 def _merge_regex_fallback(spec: dict[str, Any], transcript: str) -> dict[str, Any]:
     categorical = _regex_categorical_fields(transcript)
     for field_name, values in categorical.items():
@@ -157,6 +187,7 @@ async def _extract_spec(transcript: str) -> dict[str, Any]:
             parsed[key] = [] if key in ("columns", "correlation") else ({} if key != "rows" else 0)
 
     parsed = _merge_regex_fallback(parsed, transcript)
+    parsed = _normalize_spec_names(parsed)
     return parsed
 
 
