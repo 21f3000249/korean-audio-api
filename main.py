@@ -49,8 +49,16 @@ Extract EXACTLY this JSON structure from what is stated in the transcript:
 }
 
 Rules:
-- Only include a column under a statistic key if that statistic was actually
-  stated for that column in the transcript. If a statistic type (e.g. "mode")
+- CRITICAL: "columns" must list the name of EVERY field mentioned anywhere in
+  the transcript, in the order first mentioned - including fields that are
+  only described via allowed values, a value range, or a single statistic,
+  even if the word "column" is never said. If the transcript says something
+  like "카테고리는 A, B, C 중 하나입니다" (category is one of A, B, C), that
+  means there IS a column named "카테고리", and it must appear in "columns"
+  AND in "allowed_values" as {"카테고리": ["A", "B", "C"]}. Do not leave
+  "columns" empty if any field-level fact is stated anywhere in the transcript.
+- Only include a column under a statistic key (mean/std/etc.) if that
+  specific statistic was actually stated for that column. If a statistic type
   is never mentioned for any column, return it as an empty object {}.
 - Numbers must be actual JSON numbers, not strings.
 - Respond with ONLY the raw JSON object. No markdown fences, no commentary.
