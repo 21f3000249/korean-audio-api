@@ -62,7 +62,7 @@ async def _transcribe_korean(audio_bytes: bytes) -> str:
     data = {"model": "whisper-large-v3", "language": "ko", "response_format": "text"}
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(GROQ_URL, headers=headers, files=files, data=data)
         if resp.status_code >= 400:
             raise HTTPException(
