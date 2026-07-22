@@ -12,11 +12,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("korean-audio-api")
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-sonnet-5"
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+EXTRACT_MODEL = "llama-3.3-70b-versatile"
 
 app = FastAPI()
 
@@ -84,32 +83,33 @@ def _extract_json(raw: str) -> dict[str, Any]:
 
 
 async def _extract_spec(transcript: str) -> dict[str, Any]:
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured.")
+    if not GROQ_API_KEY:
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured.")
 
     payload = {
-        "model": MODEL,
-        "max_tokens": 1500,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": f"Transcript:\n{transcript}"}],
-        "output_config": {"effort": "low"},
+        "model": EXTRACT_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Transcript:\n{transcript}"},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
     }
     headers = {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
     }
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(ANTHROPIC_URL, json=payload, headers=headers)
+        resp = await client.post(GROQ_CHAT_URL, json=payload, headers=headers)
         if resp.status_code >= 400:
-            logger.error("ANTHROPIC ERROR %s: %s", resp.status_code, resp.text)
+            logger.error("GROQ CHAT ERROR %s: %s", resp.status_code, resp.text)
             raise HTTPException(
-                status_code=502, detail=f"Anthropic API error {resp.status_code}: {resp.text}"
+                status_code=502, detail=f"Groq chat error {resp.status_code}: {resp.text}"
             )
         data = resp.json()
 
-    text = "".join(b["text"] for b in data.get("content", []) if b.get("type") == "text")
+    text = data["choices"][0]["message"]["content"]
     parsed = _extract_json(text)
 
     # Ensure all required keys exist even if the model omitted an empty one.
