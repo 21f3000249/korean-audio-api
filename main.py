@@ -90,6 +90,37 @@ def _extract_json(raw: str) -> dict[str, Any]:
     return json.loads(cleaned)
 
 
+_CATEGORICAL_PATTERN = re.compile(
+    r"([가-힣A-Za-z0-9_]+)(?:는|은|이|가)\s*([^.]+?)\s*중\s*(?:하나|하나입니다|하나이다)"
+)
+
+
+def _regex_categorical_fields(transcript: str) -> dict[str, list[str]]:
+    """Deterministically catch '<field>는 A, B, C 중 하나입니다' style statements
+    that name a categorical column and its allowed values, so we don't depend
+    entirely on the LLM noticing this pattern."""
+    found: dict[str, list[str]] = {}
+    for match in _CATEGORICAL_PATTERN.finditer(transcript):
+        field_name = match.group(1).strip()
+        values_blob = match.group(2)
+        # Split "A, B, C" / "A,B,C" / "A, B and C" style lists.
+        values = [v.strip() for v in re.split(r"[,，、]|\s+(?:and|및|또는)\s+", values_blob) if v.strip()]
+        if field_name and values:
+            found[field_name] = values
+    return found
+
+
+def _merge_regex_fallback(spec: dict[str, Any], transcript: str) -> dict[str, Any]:
+    categorical = _regex_categorical_fields(transcript)
+    for field_name, values in categorical.items():
+        if field_name not in spec.get("columns", []):
+            spec.setdefault("columns", []).append(field_name)
+        spec.setdefault("allowed_values", {})
+        if field_name not in spec["allowed_values"]:
+            spec["allowed_values"][field_name] = values
+    return spec
+
+
 async def _extract_spec(transcript: str) -> dict[str, Any]:
     if not GROQ_API_KEY:
         raise HTTPException(status_code=500, detail="GROQ_API_KEY not configured.")
@@ -125,6 +156,7 @@ async def _extract_spec(transcript: str) -> dict[str, Any]:
         if key not in parsed:
             parsed[key] = [] if key in ("columns", "correlation") else ({} if key != "rows" else 0)
 
+    parsed = _merge_regex_fallback(parsed, transcript)
     return parsed
 
 
